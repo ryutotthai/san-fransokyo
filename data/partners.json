@@ -1,0 +1,57 @@
+[
+  {
+    "id": "vd-001",
+    "name": "Hikari EPC",
+    "specialty": "Commercial rooftop PV + storage integration",
+    "coverage": "Chiyoda, Chuo, Minato, Shibuya",
+    "phone": "+81 3-5550-1101",
+    "email": "projects@hikari-epc.jp",
+    "languages": ["日本語", "English"]
+  },
+  {
+    "id": "vd-002",
+    "name": "Kanto Solar Works",
+    "specialty": "Industrial design-build with structural retrofits",
+    "coverage": "Koto, Ota, Shinagawa, Kawasaki",
+    "phone": "+81 44-600-2480",
+    "email": "info@kantosolar.co.jp",
+    "languages": ["日本語"]
+  },
+  {
+    "id": "vd-003",
+    "name": "Skyline Renewables",
+    "specialty": "Mixed-use developments & municipal programs",
+    "coverage": "Tokyo 23 wards + Saitama south",
+    "phone": "+81 3-6622-9876",
+    "email": "hello@skylinerenewables.jp",
+    "languages": ["日本語", "English", "中文"]
+  },
+  {
+    "id": "vd-004",
+    "name": "GreenLoop O&M",
+    "specialty": "O&M, performance monitoring, IV diagnostics",
+    "coverage": "Greater Tokyo Area",
+    "phone": "+81 3-6400-5521",
+    "email": "support@greenloop.jp",
+    "languages": ["日本語", "English"]
+  },
+  {
+    "id": "vd-005",
+    "name": "Sunbridge Solutions",
+    "specialty": "Residential rooftop & battery retrofits",
+    "coverage": "Setagaya, Nerima, Suginami, Meguro",
+    "phone": "+81 3-4200-3344",
+    "email": "homes@sunbridge.jp",
+    "languages": ["日本語", "English"]
+  },
+  {
+    "id": "vd-006",
+    "name": "MetroGrid Engineers",
+    "specialty": "Utility coordination & grid studies",
+    "coverage": "Tokyo Electric Power Company (TEPCO) service area",
+    "phone": "+81 3-5200-8899",
+    "email": "contact@metrogrid.jp",
+    "languages": ["日本語", "English"]
+  }
+]
+
