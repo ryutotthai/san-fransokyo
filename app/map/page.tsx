@@ -19,14 +19,118 @@ type Rooftop = {
   notes: string;
 };
 
+type CityCluster = {
+  id: string;
+  name: string;
+  center: { lat: number; lng: number };
+  radiusKm: number;
+};
+
 const JAPAN_CENTER = { lat: 36.2048, lng: 138.2529 };
 const ZOOM_LEVEL = 6;
-const CELL_SIZE = 0.8;
+
+const CITY_CLUSTERS: CityCluster[] = [
+  {
+    id: "sapporo",
+    name: "Sapporo / Hokkaido",
+    center: { lat: 43.0642, lng: 141.3469 },
+    radiusKm: 120,
+  },
+  {
+    id: "sendai",
+    name: "Tohoku (Sendai & Miyagi)",
+    center: { lat: 38.2682, lng: 140.8694 },
+    radiusKm: 90,
+  },
+  {
+    id: "niigata",
+    name: "Sea of Japan (Niigata & Hokuriku)",
+    center: { lat: 37.9162, lng: 139.0368 },
+    radiusKm: 110,
+  },
+  {
+    id: "kanto",
+    name: "Greater Tokyo & Kanto",
+    center: { lat: 35.6895, lng: 139.6917 },
+    radiusKm: 110,
+  },
+  {
+    id: "tokai",
+    name: "Chubu & Tokai (Nagoya)",
+    center: { lat: 35.1815, lng: 136.9066 },
+    radiusKm: 90,
+  },
+  {
+    id: "kansai",
+    name: "Kansai (Kyoto, Osaka, Kobe)",
+    center: { lat: 34.6937, lng: 135.5023 },
+    radiusKm: 90,
+  },
+  {
+    id: "hiroshima",
+    name: "Chugoku (Hiroshima)",
+    center: { lat: 34.3853, lng: 132.4553 },
+    radiusKm: 80,
+  },
+  {
+    id: "shikoku",
+    name: "Shikoku (Takamatsu & Matsuyama)",
+    center: { lat: 33.8416, lng: 133.5500 },
+    radiusKm: 80,
+  },
+  {
+    id: "kyushu",
+    name: "Kyushu (Fukuoka, Kumamoto)",
+    center: { lat: 33.5902, lng: 130.4017 },
+    radiusKm: 120,
+  },
+  {
+    id: "okinawa",
+    name: "Okinawa & Islands",
+    center: { lat: 26.2124, lng: 127.6809 },
+    radiusKm: 80,
+  },
+];
+
+const EARTH_RADIUS_KM = 6371;
+
+function distanceKm(
+  pointA: { lat: number; lng: number },
+  pointB: { lat: number; lng: number }
+): number {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(pointB.lat - pointA.lat);
+  const dLng = toRad(pointB.lng - pointA.lng);
+  const lat1 = toRad(pointA.lat);
+  const lat2 = toRad(pointB.lat);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_KM * c;
+}
+
+function classifyRooftop(rooftop: Rooftop): "high" | "medium" | "low" {
+  if (rooftop.sun_hours_per_day >= 4.6 && rooftop.contact_ready) {
+    return "high";
+  }
+  if (rooftop.sun_hours_per_day < 4.2 && !rooftop.contact_ready) {
+    return "low";
+  }
+  return "medium";
+}
+
+const rooftopIconByClass: Record<"high" | "medium" | "low", string> = {
+  high: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+  medium: "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
+  low: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
+};
 
 export default function MapPage() {
   const [rooftops, setRooftops] = useState<Rooftop[]>([]);
   const [selectedRooftop, setSelectedRooftop] = useState<Rooftop | null>(null);
-  const [activeCellId, setActiveCellId] = useState<string | null>(null);
+  const [activeCityId, setActiveCityId] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const mapRef = useRef<google.maps.Map | null>(null);
 
@@ -70,55 +174,45 @@ export default function MapPage() {
     []
   );
 
-  const gridCells = useMemo(() => {
-    const cells = new Map<string, {
-      id: string;
-      latBucket: number;
-      lngBucket: number;
-      rooftops: Rooftop[];
-    }>();
+  const citySummaries = useMemo(() => {
+    return CITY_CLUSTERS.map((city) => {
+      const rooftopsInCity = rooftops.filter(
+        (rooftop) =>
+          distanceKm(city.center, { lat: rooftop.latitude, lng: rooftop.longitude }) <= city.radiusKm
+      );
 
-    rooftops.forEach((rooftop) => {
-      const latBucket = Math.floor(rooftop.latitude / CELL_SIZE);
-      const lngBucket = Math.floor(rooftop.longitude / CELL_SIZE);
-      const key = `${latBucket}:${lngBucket}`;
-
-      if (!cells.has(key)) {
-        cells.set(key, { id: key, latBucket, lngBucket, rooftops: [] });
+      if (!rooftopsInCity.length) {
+        return {
+          city,
+          rooftops: rooftopsInCity,
+          metrics: {
+            totalArea: 0,
+            totalPanels: 0,
+            avgSunHours: 0,
+            contactReadyRatio: 0,
+          },
+          classification: "low" as "high" | "medium" | "low",
+        };
       }
 
-      cells.get(key)!.rooftops.push(rooftop);
-    });
-
-    return Array.from(cells.values()).map((cell) => {
-      const south = cell.latBucket * CELL_SIZE;
-      const north = south + CELL_SIZE;
-      const west = cell.lngBucket * CELL_SIZE;
-      const east = west + CELL_SIZE;
-
-      const totalArea = cell.rooftops.reduce((sum, rooftop) => sum + rooftop.area_m2, 0);
-      const totalPanels = cell.rooftops.reduce((sum, rooftop) => sum + rooftop.estimated_panels, 0);
+      const totalArea = rooftopsInCity.reduce((sum, rooftop) => sum + rooftop.area_m2, 0);
+      const totalPanels = rooftopsInCity.reduce((sum, rooftop) => sum + rooftop.estimated_panels, 0);
       const avgSunHours =
-        cell.rooftops.reduce((sum, rooftop) => sum + rooftop.sun_hours_per_day, 0) /
-        cell.rooftops.length;
+        rooftopsInCity.reduce((sum, rooftop) => sum + rooftop.sun_hours_per_day, 0) /
+        rooftopsInCity.length;
       const contactReadyRatio =
-        cell.rooftops.filter((rooftop) => rooftop.contact_ready).length / cell.rooftops.length;
+        rooftopsInCity.filter((rooftop) => rooftop.contact_ready).length / rooftopsInCity.length;
 
       let classification: "high" | "medium" | "low" = "medium";
-      if (avgSunHours >= 4.6 && contactReadyRatio >= 0.5) {
+      if (avgSunHours >= 4.6 && contactReadyRatio >= 0.45) {
         classification = "high";
-      } else if (avgSunHours < 4.3 || contactReadyRatio < 0.25) {
+      } else if (avgSunHours < 4.2 || contactReadyRatio < 0.25) {
         classification = "low";
       }
 
       return {
-        id: cell.id,
-        bounds: { north, south, east, west },
-        rooftops: cell.rooftops,
-        centroid: {
-          lat: (north + south) / 2,
-          lng: (east + west) / 2,
-        },
+        city,
+        rooftops: rooftopsInCity,
         metrics: {
           totalArea,
           totalPanels,
@@ -130,36 +224,38 @@ export default function MapPage() {
     });
   }, [rooftops]);
 
-  const activeCell = useMemo(
-    () => gridCells.find((cell) => cell.id === activeCellId),
-    [gridCells, activeCellId]
+  const activeCity = useMemo(
+    () => citySummaries.find((summary) => summary.city.id === activeCityId),
+    [citySummaries, activeCityId]
   );
 
   const classificationColors: Record<
     "high" | "medium" | "low",
     { fillColor: string; strokeColor: string; fillOpacity: number }
   > = {
-    high: { fillColor: "#22c55e", strokeColor: "#16a34a", fillOpacity: 0.25 },
-    medium: { fillColor: "#facc15", strokeColor: "#eab308", fillOpacity: 0.2 },
-    low: { fillColor: "#f87171", strokeColor: "#ef4444", fillOpacity: 0.2 },
+    high: { fillColor: "#22c55e", strokeColor: "#15803d", fillOpacity: 0.18 },
+    medium: { fillColor: "#facc15", strokeColor: "#eab308", fillOpacity: 0.16 },
+    low: { fillColor: "#ef4444", strokeColor: "#dc2626", fillOpacity: 0.16 },
   };
 
   const handleCircleClick = useCallback(
-    (cellId: string) => {
-      const cell = gridCells.find((item) => item.id === cellId);
-      if (!cell) return;
-      setActiveCellId(cell.id);
+    (cityId: string) => {
+      const summary = citySummaries.find((item) => item.city.id === cityId);
+      if (!summary) return;
+      setActiveCityId(summary.city.id);
       setSelectedRooftop(null);
       if (mapRef.current) {
-        mapRef.current.panTo(cell.centroid);
-        mapRef.current.setZoom(9);
+        mapRef.current.panTo(summary.city.center);
+        const targetZoom =
+          summary.city.radiusKm >= 110 ? 8 : summary.city.radiusKm >= 90 ? 9 : 10;
+        mapRef.current.setZoom(targetZoom);
       }
     },
-    [gridCells]
+    [citySummaries]
   );
 
   const handleResetView = useCallback(() => {
-    setActiveCellId(null);
+    setActiveCityId(null);
     setSelectedRooftop(null);
     if (mapRef.current) {
       mapRef.current.panTo(JAPAN_CENTER);
@@ -182,6 +278,10 @@ export default function MapPage() {
             Begin with a nationwide view, then zoom into Tokyo and nearby prefectures to inspect rooftop
             exposure, system sizing, and contact-readiness. Click an energy cell to zoom in, then open rooftop
             markers inside for site-specific insights.
+          </p>
+          <p className="text-sm text-emerald-600">
+            Green cells mark high potential, yellow indicate balanced opportunity, and red highlight constrained
+            corridors.
           </p>
         </header>
 
@@ -211,46 +311,47 @@ export default function MapPage() {
                 onLoad={handleMapLoad}
                 onUnmount={handleMapUnmount}
               >
-                {gridCells.map((cell) => {
-                  const { fillColor, strokeColor, fillOpacity } = classificationColors[cell.classification];
+                {citySummaries.map((summary) => {
+                  if (!summary.rooftops.length) return null;
+                  const { city, classification, metrics } = summary;
+                  const { fillColor, strokeColor, fillOpacity } = classificationColors[classification];
                   const radius =
-                    20000 +
+                    city.radiusKm * 1000 +
                     Math.min(
                       40000,
-                      Math.sqrt(Math.max(cell.metrics.totalArea, 1)) * 25 + cell.rooftops.length * 1500
+                      Math.sqrt(Math.max(metrics.totalArea, 1)) * 18 + summary.rooftops.length * 1200
                     );
                   return (
                     <Circle
-                      key={cell.id}
-                      center={cell.centroid}
+                      key={city.id}
+                      center={city.center}
                       radius={radius}
                       options={{
                         fillColor,
                         strokeColor,
                         fillOpacity,
                         strokeOpacity: 0.6,
-                        strokeWeight: activeCellId === cell.id ? 2 : 1,
+                        strokeWeight: activeCityId === city.id ? 2 : 1,
                         clickable: true,
-                        zIndex: activeCellId === cell.id ? 30 : 10,
+                        zIndex: activeCityId === city.id ? 30 : 10,
                       }}
-                      onClick={() => handleCircleClick(cell.id)}
+                      onClick={() => handleCircleClick(city.id)}
                     />
                   );
                 })}
 
-                {activeCell &&
-                  activeCell.rooftops.map((rooftop) => (
-                    <Marker
-                      key={rooftop.id}
-                      position={{ lat: rooftop.latitude, lng: rooftop.longitude }}
-                      onClick={() => setSelectedRooftop(rooftop)}
-                      icon={{
-                        url: rooftop.contact_ready
-                          ? "https://maps.google.com/mapfiles/ms/icons/green-dot.png"
-                          : "https://maps.google.com/mapfiles/ms/icons/yellow-dot.png",
-                      }}
-                    />
-                  ))}
+                {activeCity &&
+                  activeCity.rooftops.map((rooftop) => {
+                    const quality = classifyRooftop(rooftop);
+                    return (
+                      <Marker
+                        key={rooftop.id}
+                        position={{ lat: rooftop.latitude, lng: rooftop.longitude }}
+                        onClick={() => setSelectedRooftop(rooftop)}
+                        icon={{ url: rooftopIconByClass[quality] }}
+                      />
+                    );
+                  })}
 
                 {selectedRooftop && (
                   <InfoWindow
@@ -297,27 +398,35 @@ export default function MapPage() {
                   </InfoWindow>
                 )}
 
-                {activeCell && !selectedRooftop && (
-                  <InfoWindow position={activeCell.centroid} onCloseClick={handleResetView}>
+                {activeCity && !selectedRooftop && (
+                  <InfoWindow position={activeCity.city.center} onCloseClick={handleResetView}>
                     <div className="space-y-2 text-sm text-slate-700">
                       <p className="font-semibold text-slate-900">
-                        Grid segment overview ({activeCell.rooftops.length} rooftops)
+                        {activeCity.city.name} ({activeCity.rooftops.length} rooftops)
                       </p>
                       <p>
                         <span className="font-medium">Total usable area:</span>{" "}
-                        {Math.round(activeCell.metrics.totalArea).toLocaleString()} m²
+                        {Math.round(activeCity.metrics.totalArea).toLocaleString()} m²
                       </p>
                       <p>
                         <span className="font-medium">Estimated panels:</span>{" "}
-                        {Math.round(activeCell.metrics.totalPanels).toLocaleString()}
+                        {Math.round(activeCity.metrics.totalPanels).toLocaleString()}
                       </p>
                       <p>
                         <span className="font-medium">Avg. sun hours:</span>{" "}
-                        {activeCell.metrics.avgSunHours.toFixed(2)} h/day
+                        {activeCity.metrics.avgSunHours.toFixed(2)} h/day
+                      </p>
+                      <p>
+                        <span className="font-medium">Zone classification:</span>{" "}
+                        {activeCity.classification === "high"
+                          ? "High potential"
+                          : activeCity.classification === "medium"
+                          ? "Balanced opportunity"
+                          : "Constrained / congested"}
                       </p>
                       <p>
                         <span className="font-medium">Contact-ready share:</span>{" "}
-                        {(activeCell.metrics.contactReadyRatio * 100).toFixed(0)}%
+                        {(activeCity.metrics.contactReadyRatio * 100).toFixed(0)}%
                       </p>
                       <p className="text-xs text-slate-500">
                         Click a rooftop marker within this zone to review individual site details or close to reset the national view.
@@ -326,6 +435,27 @@ export default function MapPage() {
                   </InfoWindow>
                 )}
               </GoogleMap>
+            </div>
+          )}
+
+          {isLoaded && (
+            <div className="flex flex-wrap items-center gap-4 text-xs text-emerald-700">
+              <span className="font-medium uppercase tracking-wide text-emerald-800">Legend</span>
+              <span className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-emerald-500/80" />
+                High potential zone
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-yellow-400/80" />
+                Balanced opportunity
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full bg-red-400/80" />
+                Constrained / congested
+              </span>
+              <span className="text-emerald-600">
+                Pins adopt the same color scale to show individual rooftop quality.
+              </span>
             </div>
           )}
 
